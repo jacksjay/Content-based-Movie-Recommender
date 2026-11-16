@@ -1,9 +1,5 @@
 import html
-import os
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 
-import requests
 import streamlit as st
 
 from src.recommender import MODES, Recommender
@@ -20,7 +16,6 @@ CSS = """
 .card {background:#161b26; border:1px solid #232a3a; border-radius:14px; overflow:hidden;
   transition: transform .15s ease, border-color .15s ease; margin-bottom:.5rem;}
 .card:hover {transform: translateY(-3px); border-color:#7c5cff;}
-.poster {width:100%; aspect-ratio:2/3; object-fit:cover; display:block;}
 .ph {aspect-ratio:2/3; display:flex; align-items:center; justify-content:center;
   font-size:2.4rem; font-weight:800; color:rgba(255,255,255,.85);}
 .cbody {padding:.7rem .8rem .8rem .8rem;}
@@ -43,38 +38,8 @@ def load() -> Recommender:
     return Recommender.load()
 
 
-def tmdb_key() -> str | None:
-    key = os.getenv("TMDB_API_KEY")
-    if key:
-        return key
-    try:
-        return st.secrets.get("TMDB_API_KEY")
-    except Exception:
-        return None
-
-
-@lru_cache(maxsize=4096)
-def fetch_poster(movie_id: int, api_key: str) -> str | None:
-    try:
-        r = requests.get(f"https://api.themoviedb.org/3/movie/{movie_id}",
-                         params={"api_key": api_key}, timeout=5)
-        path = r.json().get("poster_path")
-        return f"https://image.tmdb.org/t/p/w342{path}" if path else None
-    except Exception:
-        return None
-
-
-def posters_for(ids: list[int]) -> dict[int, str | None]:
-    key = tmdb_key()
-    if not key:
-        return {i: None for i in ids}
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        return dict(zip(ids, ex.map(lambda i: fetch_poster(i, key), ids)))
-
-
-def visual(row, poster: str | None) -> str:
-    if poster:
-        return f'<img class="poster" src="{poster}">'
+def visual(row) -> str:
+    # Generates a gradient background with initials instead of a poster
     hue = (int(row["movie_id"]) * 47) % 360
     initials = "".join(w[0] for w in row["title"].split()[:2]).upper()
     return (f'<div class="ph" style="background:linear-gradient(135deg,'
@@ -91,10 +56,10 @@ def meta_line(row) -> str:
     return " · ".join(parts)
 
 
-def card(row, poster, score, reasons) -> str:
+def card(row, score, reasons) -> str:
     chips = "".join(f'<span class="chip">{html.escape(r)}</span>' for r in reasons[:3])
     return (
-        '<div class="card">' + visual(row, poster) + '<div class="cbody">'
+        '<div class="card">' + visual(row) + '<div class="cbody">'
         f'<span class="match">{score * 100:.0f}%</span>'
         f'<div class="ctitle">{html.escape(row["title"])}</div>'
         f'<div class="meta">{meta_line(row)}</div>{chips}</div></div>'
@@ -131,8 +96,6 @@ with st.sidebar:
     genres = st.multiselect("Only show genres", rec.all_genres)
     min_rating = st.slider("Minimum rating", 0.0, 9.0, 0.0, 0.5)
     st.caption(f"{len(df):,} movies in catalog")
-    if not tmdb_key():
-        st.caption("💡 Set `TMDB_API_KEY` to show real posters.")
 
 if "selected_label" not in st.session_state:
     default = next((l for l in rec.labels if l.startswith("Avatar")), rec.labels[0])
@@ -144,15 +107,13 @@ i = rec.label_to_idx[label]
 row = df.iloc[i]
 
 results = rec.recommend(i, k=k, mode=mode, alpha=alpha, genres=genres, min_rating=min_rating)
-ids = [int(row["movie_id"])] + [int(df.iloc[r["idx"]]["movie_id"]) for r in results]
-posters = posters_for(ids)
 
 tab_rec, tab_cmp = st.tabs(["✨ Recommendations", "🧪 Compare models"])
 
 with tab_rec:
     left, right = st.columns([1, 3], gap="large")
     with left:
-        st.markdown('<div class="card">' + visual(row, posters[ids[0]]) + '</div>',
+        st.markdown('<div class="card">' + visual(row) + '</div>',
                     unsafe_allow_html=True)
     with right:
         st.subheader(row["title"])
@@ -173,7 +134,7 @@ with tab_rec:
         for col, r in zip(cols, results[start:start + 5]):
             rrow = df.iloc[r["idx"]]
             with col:
-                st.markdown(card(rrow, posters[int(rrow["movie_id"])], r["score"], r["reasons"]),
+                st.markdown(card(rrow, r["score"], r["reasons"]),
                             unsafe_allow_html=True)
                 st.button("Explore →", key=f"go_{rrow['movie_id']}_{start}",
                           on_click=select_movie, args=(rrow["label"],),
@@ -188,5 +149,3 @@ with tab_cmp:
             st.markdown(f"**{m}**")
             for n, r in enumerate(rec.recommend(i, k=5, mode=m, alpha=alpha), 1):
                 st.markdown(f"{n}. {df.iloc[r['idx']]['title']}  `{r['score']:.2f}`")
-
-
