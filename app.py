@@ -75,7 +75,7 @@ try:
     rec = load()
 except FileNotFoundError as e:
     st.error(f"{e}")
-    st.info("Run the export cell at the end of your notebook, unzip `artifacts.zip` into this "
+    st.info("Files missing: unzip `artifacts.zip` into this "
             "project's `artifacts/` folder, then restart the app.")
     st.stop()
 
